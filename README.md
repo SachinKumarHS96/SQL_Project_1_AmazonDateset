@@ -1,1 +1,672 @@
-# SQL_Project_1_AmazonDateset
+
+# **Amazon USA Sales Analysis Project**
+
+### **Difficulty Level: Advanced**
+
+---
+
+## **Project Overview**
+
+I have worked on analyzing a dataset of over 20,000 sales records from an Amazon-like e-commerce platform. This project involves extensive querying of customer behavior, product performance, and sales trends using MySQL. Through this project, I have tackled various SQL problems, including revenue analysis, customer segmentation, and inventory management.
+
+The project also focuses on data cleaning, handling null values, and solving real-world business problems using structured queries.
+
+An ERD diagram is included to visually represent the database schema and relationships between tables.
+
+---
+
+![Image](https://github.com/user-attachments/assets/bb1b4e5f-30b7-4706-9c16-ff641ba6a3dd)
+
+## **Database Setup & Design**
+
+### **Schema Structure**
+
+```sql
+
+use amazon_db;
+
+CREATE TABLE category (
+category_id INT PRIMARY KEY NOT NULL,
+category_name VARCHAR(20) NOT NULL
+);
+
+CREATE TABLE sellers (
+seller_id INT PRIMARY KEY,
+seller_name VARCHAR(25),
+origin VARCHAR(10)
+);
+
+CREATE TABLE customers (
+customer_id INT PRIMARY KEY,
+first_name VARCHAR(25),
+last_name VARCHAR(25),
+state VARCHAR(25)
+);
+
+CREATE TABLE products (
+product_id INT PRIMARY KEY,
+product_name VARCHAR(50),
+price FLOAT,
+cogs FLOAT,
+category_id INT,
+CONSTRAINT products_ref_category FOREIGN KEY (category_id) REFERENCES category(category_id)
+);
+
+CREATE TABLE inventory (
+inventory_id INT PRIMARY KEY,
+product_id INT,
+stock INT,
+warehouse_id INT,
+last_stock_date date,
+CONSTRAINT inventory_ref_products FOREIGN KEY (product_id) REFERENCES products (product_id)
+);
+
+CREATE TABLE orders (
+order_id INT PRIMARY KEY,
+order_date date,
+customer_id INT,
+seller_id INT,
+order_status VARCHAR(15),
+CONSTRAINT orders_ref_customers FOREIGN KEY (customer_id) REFERENCES customers(customer_id),
+CONSTRAINT orders_ref_sellers FOREIGN KEY (seller_id) REFERENCES sellers(seller_id)
+);
+
+CREATE TABLE order_items (
+order_item_id INT PRIMARY KEY,
+order_id INT,
+product_id INT,
+quantity INT,
+price_per_unit FLOAT,
+CONSTRAINT orderitems_ref_products FOREIGN KEY (product_id) REFERENCES products (product_id),
+CONSTRAINT orderitems_ref_orders FOREIGN KEY (order_id) REFERENCES orders (order_id)
+);
+
+CREATE TABLE payments (
+payment_id INT PRIMARY KEY,
+order_id INT,
+payment_date DATE,
+payment_status VARCHAR(20),
+CONSTRAINT payments_ref_orders FOREIGN KEY (order_id) REFERENCES orders (order_id)
+);
+
+CREATE TABLE shipping (
+shipping_id INT PRIMARY KEY,
+order_id INT,
+shipping_date DATE,
+return_date DATE,
+shipping_providers VARCHAR(25),
+delivery_status VARCHAR(25),
+CONSTRAINT shipping_ref_orders FOREIGN KEY (order_id) REFERENCES orders (order_id)
+);
+```
+
+---
+
+## **Task: Data Cleaning**
+
+I cleaned the dataset by:
+- **Removing duplicates**: Duplicates in the customer and order tables were identified and removed.
+- **Handling missing values**: Null values in critical fields (e.g., customer address, payment status) were either filled with default values or handled using appropriate methods.
+
+---
+
+## **Handling Null Values**
+
+Null values were handled based on their context:
+- **Customer addresses**: Missing addresses were assigned default placeholder values.
+- **Payment statuses**: Orders with null payment statuses were categorized as “Pending.”
+- **Shipping information**: Null return dates were left as is, as not all shipments are returned.
+
+---
+
+## **Objective**
+
+The primary objective of this project is to showcase SQL proficiency through complex queries that address real-world e-commerce business challenges. The analysis covers various aspects of e-commerce operations, including:
+- Customer behavior
+- Sales trends
+- Inventory management
+- Payment and shipping analysis
+- Forecasting and product performance
+  
+
+## **Identifying Business Problems**
+
+Key business problems identified:
+1. Low product availability due to inconsistent restocking.
+2. High return rates for specific product categories.
+3. Significant delays in shipments and inconsistencies in delivery times.
+4. High customer acquisition costs with a low customer retention rate.
+
+---
+
+## **Solving Business Problems**
+
+### Solutions Implemented:
+1. Top Selling Products
+Query the top 10 products by total sales value.
+Challenge: Include product name, total quantity sold, and total sales value.
+
+```sql
+WITH t AS (
+    SELECT o.product_id, p.product_name, 
+        SUM(o.quantity) AS total_quantity_sold, 
+        ROUND(SUM(o.quantity * o.price_per_unit), 2) AS total_sales_value
+    FROM order_items o
+    LEFT JOIN products p 
+        ON o.product_id = p.product_id
+    GROUP BY o.product_id, p.product_name
+)
+SELECT product_name, total_quantity_sold, total_sales_value
+FROM t
+ORDER BY total_sales_value DESC
+LIMIT 10;
+```
+
+2. Revenue by Category
+Calculate total revenue generated by each product category.
+Challenge: Include the percentage contribution of each category to total revenue.
+
+```sql
+WITH t AS (
+    SELECT p.category_id, c.category_name, 
+        ROUND(SUM(o.quantity * o.price_per_unit), 2) AS revenue
+    FROM order_items o
+    LEFT JOIN products p 
+        ON o.product_id = p.product_id
+    LEFT JOIN category c 
+        ON p.category_id = c.category_id
+    GROUP BY p.category_id, c.category_name
+)
+SELECT *, 
+	ROUND(revenue / (SELECT SUM(revenue) FROM t) * 100, 2) AS percent_contribution
+FROM t;
+```
+
+3. Average Order Value (AOV)
+Compute the average order value for each customer.
+Challenge: Include only customers with more than 5 orders.
+
+```sql
+WITH t AS (
+    SELECT c.customer_id, 
+        COUNT(o.order_id) AS orders, 
+        ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS total_value
+    FROM order_items oi
+    LEFT JOIN orders o 
+        ON oi.order_id = o.order_id
+    LEFT JOIN customers c 
+        ON o.customer_id = c.customer_id
+    GROUP BY c.customer_id
+)
+SELECT customer_id, 
+    ROUND((total_value / orders), 2) AS aov
+FROM t
+WHERE orders > 5;
+```
+
+4. Monthly Sales Trend
+Query monthly total sales over the past year.
+Challenge: Display the sales trend, grouping by month, return current_month sale, last month sale!
+
+```sql
+WITH t AS (
+    SELECT o.order_id, o.order_date, 
+        (oi.quantity * oi.price_per_unit) AS price, 
+        DATE_FORMAT(order_date, '%Y/%m') AS month
+    FROM orders o
+    LEFT JOIN order_items oi 
+        ON o.order_id = oi.order_id
+),
+t2 AS (
+    SELECT month, 
+        ROUND(SUM(price), 2) AS total_sales
+    FROM t
+    WHERE order_date > (SELECT SUBDATE(MAX(order_date), INTERVAL 1 YEAR) FROM orders)
+    GROUP BY month
+)
+SELECT month, 
+	total_sales AS current_month_sale, 
+    Lead(total_sales) OVER (ORDER BY month DESC) AS last_month_sale
+FROM t2;
+```
+
+
+5. Customers with No Purchases
+Find customers who have registered but never placed an order.
+Challenge: List customer details and the time since their registration.
+
+```sql
+SELECT 
+    customer_id, first_name, last_name, state
+FROM customers c
+LEFT JOIN orders o 
+ON c.customer_id = o.customer_id
+WHERE
+    o.order_id IS NULL;
+
+/*time since registration is not possible as data does not have customer registration date, but if
+the data is available (column "reg_date"), then the code can be written as - */
+
+SELECT 
+    customer_id, first_name, last_name, state,
+    DATEDIFF(CURRENT_DATE(), reg_date) AS days_since_registration
+FROM customers c
+LEFT JOIN orders o 
+ON c.customer_id=o.customer_id
+WHERE
+    o.order_id IS NULL;
+```
+
+6. Least-Selling Categories by State
+Identify the least-selling product category for each state.
+Challenge: Include the total sales for that category within each state.
+
+```sql
+WITH sales_by_category AS (
+    SELECT c.state, ct.category_name,
+        ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS sales_value
+    FROM customers c
+    INNER JOIN orders o ON c.customer_id = o.customer_id
+    INNER JOIN order_items oi ON o.order_id = oi.order_id
+    INNER JOIN products p ON oi.product_id = p.product_id
+    INNER JOIN category ct ON p.category_id = ct.category_id
+    GROUP BY c.state, ct.category_name
+),
+ranked_sales AS (
+    SELECT *,
+        DENSE_RANK() OVER (PARTITION BY state ORDER BY sales_value ASC) AS rnk
+    FROM sales_by_category
+)
+SELECT state, category_name, sales_value
+FROM ranked_sales
+WHERE rnk = 1;
+```
+
+
+7. Customer Lifetime Value (CLTV)
+Calculate the total value of orders placed by each customer over their lifetime.
+Challenge: Rank customers based on their CLTV.
+
+```sql
+WITH t AS (
+    SELECT 
+        c.customer_id,
+        CONCAT(c.first_name, ' ', c.last_name) AS name,
+        ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS cltv
+    FROM 
+        customers c
+        INNER JOIN orders o ON c.customer_id = o.customer_id
+        INNER JOIN order_items oi ON o.order_id = oi.order_id
+    GROUP BY 
+        c.customer_id, name
+)
+SELECT 
+    *, DENSE_RANK() OVER (ORDER BY cltv DESC) AS rnk
+FROM t;
+```
+
+
+8. Inventory Stock Alerts
+Query products with stock levels below a certain threshold (e.g., less than 10 units).
+Challenge: Include last restock date and warehouse information.
+
+```sql
+SELECT i.product_id, p.product_name, 
+    i.stock, i.warehouse_id, 
+    i.last_stock_date
+FROM inventory i
+    LEFT JOIN products p ON i.product_id = p.product_id
+WHERE i.stock < 10;
+```
+
+9. Shipping Delays
+Identify orders where the shipping date is later than 3 days after the order date.
+Challenge: Include customer, order details, and delivery provider.
+
+```sql
+SELECT 
+    c.customer_id, 
+    CONCAT(c.first_name, ' ', c.last_name) AS name, 
+    o.order_id, 
+    o.order_date, 
+    s.shipping_date, 
+    s.shipping_providers
+FROM orders o
+INNER JOIN customers c 
+    ON o.customer_id = c.customer_id
+INNER JOIN shipping s 
+    ON o.order_id = s.order_id
+WHERE DATE(s.shipping_date) = DATE_ADD(DATE(o.order_date), INTERVAL 3 DAY);
+```
+
+10. Payment Success Rate 
+Calculate the percentage of successful payments across all orders.
+Challenge: Include breakdowns by payment status (e.g., failed, pending).
+
+```sql
+SELECT 
+    payment_status, 
+    COUNT(*) AS total_payment, 
+    ROUND((COUNT(*) * 100.0) / (SELECT COUNT(*) FROM payments),2) AS percent
+FROM payments
+GROUP BY 
+    payment_status;
+```
+
+11. Top Performing Sellers
+Find the top 5 sellers based on total sales value.
+Challenge: Include both successful and failed orders, and display their percentage of successful orders.
+
+```sql
+WITH t AS (
+    SELECT 
+        s.seller_id,
+        s.seller_name,
+        ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS total_sales_value,
+        SUM(CASE WHEN o.order_status = 'Completed' THEN 1 ELSE 0 END) AS completed_orders,
+        ROUND(
+            (SUM(CASE WHEN o.order_status = 'Completed' THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) AS completed_ord_percent,
+        SUM(CASE WHEN o.order_status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled_orders,
+        ROUND(
+            (SUM(CASE WHEN o.order_status = 'Cancelled' THEN 1 ELSE 0 END) / COUNT(*)) * 100, 2) AS cancelled_ord_percent
+    FROM 
+        sellers s
+        JOIN orders o ON s.seller_id = o.seller_id
+        JOIN order_items oi ON o.order_id = oi.order_id
+    GROUP BY 
+        s.seller_id, s.seller_name
+)
+SELECT *
+FROM t
+ORDER BY total_sales_value DESC
+LIMIT 5;
+```
+
+
+12. Product Profit Margin
+Calculate the profit margin for each product (difference between price and cost of goods sold).
+Challenge: Rank products by their profit margin, showing highest to lowest.
+*/
+
+
+```sql
+WITH t AS (
+    SELECT 
+        p.product_id, 
+        p.product_name,
+        ROUND(SUM(p.cogs * oi.quantity), 2) AS total_cost,
+        ROUND(SUM(oi.price_per_unit * oi.quantity), 2) AS total_price
+    FROM products p
+    JOIN order_items oi ON p.product_id = oi.product_id
+    GROUP BY 1,2
+),
+t2 AS (
+    SELECT *, 
+        ROUND(((total_price - total_cost) / total_price) * 100, 2) AS profit_margine
+    FROM t
+)
+SELECT *, 
+    DENSE_RANK() OVER (ORDER BY profit_margine DESC) AS product_rank
+FROM t2;
+```
+
+13. Most Returned Products
+Query the top 10 products by the number of returns.
+Challenge: Display the return rate as a percentage of total units sold for each product.
+
+```sql
+WITH t AS (
+    SELECT 
+        p.product_id,
+        p.product_name,
+        SUM(oi.quantity) AS ordered_qty,
+        SUM(CASE WHEN o.order_status = 'returned' THEN oi.quantity END) AS returned_qty
+    FROM products p
+    JOIN order_items oi ON p.product_id = oi.product_id
+    JOIN orders o ON oi.order_id = o.order_id
+    GROUP BY 1,2
+),
+t2 AS (
+    SELECT *, 
+        ROUND((returned_qty / ordered_qty) * 100, 2) AS return_rate
+    FROM t
+)
+SELECT * 
+FROM t2
+ORDER BY return_rate DESC
+LIMIT 10;
+```
+
+14. Inactive Sellers
+Identify sellers who haven’t made any sales in the last 6 months.
+Challenge: Show the last sale date and total sales from those sellers.
+
+```sql
+WITH t AS (
+    SELECT *
+    FROM sellers s
+    WHERE seller_id NOT IN (
+        SELECT seller_id
+        FROM orders
+        WHERE order_date <= (SELECT DATE_SUB(MAX(order_date), INTERVAL 6 MONTH)
+            FROM orders)
+    )
+)
+SELECT 
+    t.seller_id,
+    MAX(o.order_date) AS last_sale_date,
+    ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS total_sales
+FROM 
+    t
+    JOIN orders o ON t.seller_id = o.seller_id
+    JOIN order_items oi ON o.order_id = oi.order_id
+GROUP BY 
+    t.seller_id;
+```
+
+
+15. IDENTITY customers into returning or new
+if the customer has done more than 5 return categorize them as returning otherwise new
+Challenge: List customers id, name, total orders, total returns
+
+```sql
+WITH t AS (
+    SELECT 
+        c.customer_id,
+        CONCAT(c.first_name, ' ', c.last_name) AS name,
+        COUNT(o.order_id) AS total_orders,
+        SUM(CASE WHEN o.order_status = 'Returned' THEN 1 ELSE 0 END) AS total_returns
+    FROM 
+        orders o
+        JOIN customers c ON o.customer_id = c.customer_id
+    GROUP BY 
+        c.customer_id, name
+)
+SELECT 
+    *,
+    CASE 
+        WHEN total_returns > 5 THEN 'returning_customer'
+        ELSE 'new' END AS customer_type
+FROM t;
+```
+
+
+16. Top 5 Customers by Orders in Each State
+Identify the top 5 customers with the highest number of orders for each state.
+Challenge: Include the number of orders and total sales for each customer.
+```sql
+WITH t AS (
+    SELECT 
+        c.customer_id,
+        CONCAT(c.first_name, ' ', c.last_name) AS name,
+        c.state,
+        COUNT(o.order_id) AS total_orders,
+        ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS total_sales
+    FROM 
+        customers c
+        JOIN orders o ON c.customer_id = o.customer_id
+        JOIN order_items oi ON oi.order_id = o.order_id
+    GROUP BY 
+        c.customer_id, name, c.state
+),
+t2 AS (
+    SELECT *,
+        DENSE_RANK() OVER (PARTITION BY state ORDER BY total_orders DESC) AS c_rank
+    FROM t
+)
+SELECT *
+FROM t2
+WHERE c_rank <= 5;
+```
+
+17. Revenue by Shipping Provider
+Calculate the total revenue handled by each shipping provider.
+Challenge: Include the total number of orders handled and the average delivery time for each provider.
+
+```sql
+SELECT 
+    s.shipping_providers,
+    ROUND(SUM(oi.quantity * oi.price_per_unit), 2) AS revenue,
+    COUNT(s.order_id) AS total_orders,
+    ROUND(COALESCE(AVG(s.shipping_date - s.return_date), 0), 2) AS average_days
+FROM 
+    shipping s
+    JOIN orders o ON s.order_id = o.order_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+GROUP BY 
+    s.shipping_providers;
+```
+
+18. Top 10 product with highest decreasing revenue ratio compare to last year(2022) and current_year(2023)
+Challenge: Return product_id, product_name, category_name, 2022 revenue and 2023 revenue decrease ratio at end Round the result
+Note: Decrease ratio = cr-ls/ls* 100 (cs = current_year ls=last_year)
+
+```sql
+WITH t AS (
+    SELECT p.product_id,
+        p.product_name,
+        c.category_name,
+        ROUND(SUM(CASE 
+            WHEN EXTRACT(YEAR FROM o.order_date) = 2022 
+            THEN oi.quantity * oi.price_per_unit ELSE 0 END), 2) AS 2022_revenue,
+        ROUND(SUM(CASE 
+            WHEN EXTRACT(YEAR FROM o.order_date) = 2023 
+            THEN oi.quantity * oi.price_per_unit ELSE 0 END), 2) AS 2023_revenue
+    FROM 
+        products p
+        JOIN order_items oi ON p.product_id = oi.product_id
+        JOIN category c ON p.category_id = c.category_id
+        JOIN orders o ON o.order_id = oi.order_id
+    GROUP BY 
+        p.product_id, p.product_name, c.category_name
+),
+t2 AS (
+    SELECT *,
+        ROUND(((2023_revenue - 2022_revenue) / 2022_revenue) * 100, 2) AS revenue_ratio
+    FROM t
+),
+t3 AS (
+    SELECT *,
+        DENSE_RANK() OVER (ORDER BY revenue_ratio) AS r_rank
+    FROM t2
+    WHERE revenue_ratio IS NOT NULL
+)
+SELECT *
+FROM t3
+WHERE r_rank <= 10;
+```
+
+
+19. Final Task: Stored Procedure
+Create a stored procedure that, when a product is sold, performs the following actions:
+Inserts a new sales record into the orders and order_items tables.
+Updates the inventory table to reduce the stock based on the product and quantity purchased.
+The procedure should ensure that the stock is adjusted immediately after recording the sale.
+
+```SQL
+drop procedure if exists add_sales;
+DELIMITER $$
+
+CREATE PROCEDURE add_sales (
+    IN p_order_id INT,
+    IN p_customer_id INT,
+    IN p_seller_id INT,
+    IN p_order_item_id INT,
+    IN p_product_id INT,
+    IN p_quantity INT
+)
+BEGIN
+    DECLARE v_count INT DEFAULT 0;
+    DECLARE v_price FLOAT DEFAULT 0;
+    DECLARE v_product VARCHAR(50) DEFAULT '';
+
+    -- Fetch product name and price
+    SELECT price, product_name
+    INTO v_price, v_product
+    FROM products
+    WHERE product_id = p_product_id;
+
+    -- Check inventory availability
+    SELECT COUNT(*) INTO v_count
+    FROM inventory
+    WHERE product_id = p_product_id
+    AND stock >= p_quantity;
+
+    IF v_count > 0 THEN
+        -- Insert into orders
+        INSERT INTO orders(order_id, order_date, customer_id, seller_id)
+        VALUES (p_order_id, CURRENT_DATE(), p_customer_id, p_seller_id);
+
+        -- Insert into order_items without total_sale
+        INSERT INTO order_items(order_item_id, order_id, product_id, quantity, price_per_unit)
+        VALUES (p_order_item_id, p_order_id, p_product_id, p_quantity, v_price);
+
+        -- Update inventory stock
+        UPDATE inventory
+        SET stock = stock - p_quantity
+        WHERE product_id = p_product_id;
+
+        SELECT CONCAT('Thank you! Product: ', v_product, ' sale has been added, and inventory stock updated.') AS Message;
+    ELSE
+        SELECT CONCAT('Thank you! The product: ', v_product, ' is not available.') AS Message;
+    END IF;
+END$$
+
+DELIMITER ;
+```
+
+
+
+**Testing Store Procedure**
+call add_sales
+(
+25005, 2, 5, 25004, 1, 14
+);
+
+---
+
+---
+
+## **Learning Outcomes**
+
+This project enabled me to:
+- Design and implement a normalized database schema.
+- Clean and preprocess real-world datasets for analysis.
+- Use advanced SQL techniques, including window functions, subqueries, and joins.
+- Conduct in-depth business analysis using SQL.
+- Optimize query performance and handle large datasets efficiently.
+
+---
+
+## **Conclusion**
+
+This advanced SQL project successfully demonstrates my ability to solve real-world e-commerce problems using structured queries. From improving customer retention to optimizing inventory and logistics, the project provides valuable insights into operational challenges and solutions.
+
+By completing this project, I have gained a deeper understanding of how SQL can be used to tackle complex data problems and drive business decision-making.
+
+---
+
+### **Entity Relationship Diagram (ERD)**
+![Image](https://github.com/user-attachments/assets/bb1b4e5f-30b7-4706-9c16-ff641ba6a3dd)
+
+---
